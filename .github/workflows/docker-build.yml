@@ -26,24 +26,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
       - name: Login to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Build and Push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64
-          tags: |
-            ${{ env.IMAGE }}:scutbot
-            ${{ env.IMAGE }}:latest
-          cache-from: type=gha,scope=reactive-resume-amd64
-          cache-to: type=gha,mode=max,scope=reactive-resume-amd64
+        run: |
+          docker build \
+            --tag "${IMAGE}:scutbot" \
+            --tag "${IMAGE}:latest" \
+            .
+          docker push "${IMAGE}:scutbot"
+          docker push "${IMAGE}:latest"
