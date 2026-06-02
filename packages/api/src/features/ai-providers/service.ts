@@ -1,9 +1,10 @@
 import type { AIProvider } from "@reactive-resume/ai/types";
 import { ORPCError } from "@orpc/client";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { aiProviderSchema } from "@reactive-resume/ai/types";
+import { AI_PROVIDER_DEFAULT_BASE_URLS, aiProviderSchema } from "@reactive-resume/ai/types";
 import { db } from "@reactive-resume/db/client";
 import * as schema from "@reactive-resume/db/schema";
+import { env } from "@reactive-resume/env/server";
 import {
 	assertCredentialEncryptionConfigured,
 	decryptCredential,
@@ -14,6 +15,7 @@ import { testConnection } from "../ai/service";
 import { resolveAiBaseUrl } from "../ai/url-policy";
 
 type AiProviderRecord = typeof schema.aiProvider.$inferSelect;
+const ORGANIZATION_PROVIDER_ID = "organization-default";
 
 export type AiProviderResponse = {
 	id: string;
@@ -30,6 +32,7 @@ export type AiProviderResponse = {
 	lastUsedAt: Date | null;
 	createdAt: Date;
 	updatedAt: Date;
+	readOnly: boolean;
 };
 
 type CreateAiProviderInput = {
@@ -76,7 +79,46 @@ function toResponse(row: AiProviderRecord): AiProviderResponse {
 		lastUsedAt: row.lastUsedAt,
 		createdAt: row.createdAt,
 		updatedAt: row.updatedAt,
+		readOnly: false,
 	};
+}
+
+function getOrganizationProviderResponse() {
+	if (!env.AI_ORG_ENABLED) return null;
+
+	const provider = aiProviderSchema.parse(env.AI_ORG_PROVIDER ?? "openai-compatible");
+	const label = env.AI_ORG_LABEL?.trim() || "Organization AI";
+	const model = env.AI_ORG_MODEL?.trim();
+	const apiKey = env.AI_ORG_API_KEY?.trim();
+	const baseURL = env.AI_ORG_BASE_URL?.trim() || AI_PROVIDER_DEFAULT_BASE_URLS[provider];
+
+	if (!model || !apiKey) return null;
+
+	const createdAt = new Date(0);
+	return {
+		id: ORGANIZATION_PROVIDER_ID,
+		label,
+		provider,
+		model,
+		baseURL,
+		enabled: true,
+		testStatus: "success",
+		testError: null,
+		apiKeyPreview: "org-managed",
+		apiKeyFingerprint: "org-managed",
+		lastTestedAt: null,
+		lastUsedAt: null,
+		createdAt,
+		updatedAt: createdAt,
+		readOnly: true,
+	} satisfies AiProviderResponse;
+}
+
+function getOrganizationProviderRunnable() {
+	const response = getOrganizationProviderResponse();
+	const apiKey = env.AI_ORG_API_KEY?.trim();
+
+	return response && apiKey ? { ...response, apiKey, baseURL: response.baseURL ?? "" } : null;
 }
 
 function normalizeBaseUrl(input: { provider: AIProvider; baseURL?: string | null }) {
@@ -112,11 +154,20 @@ export const aiProvidersService = {
 			.where(eq(schema.aiProvider.userId, input.userId))
 			.orderBy(orderByLastUsedAtDescNullsLast(), asc(schema.aiProvider.createdAt));
 
-		return providers.map(toResponse);
+		const rows = providers.map(toResponse);
+		const organizationProvider = getOrganizationProviderResponse();
+
+		return organizationProvider ? [organizationProvider, ...rows] : rows;
 	},
 
 	getRunnableById: async (input: { id: string; userId: string }) => {
 		assertCredentialEncryptionConfigured();
+
+		if (input.id === ORGANIZATION_PROVIDER_ID) {
+			const provider = getOrganizationProviderRunnable();
+			if (!provider) throw new ORPCError("NOT_FOUND");
+			return provider;
+		}
 
 		const provider = await getOwnedProvider(input);
 		if (!provider.enabled || provider.testStatus !== "success") {
@@ -152,7 +203,7 @@ export const aiProvidersService = {
 					apiKey: decryptCredential(provider.encryptedApiKey),
 					baseURL: provider.baseUrl ?? "",
 				}
-			: null;
+			: getOrganizationProviderRunnable();
 	},
 
 	create: async (input: CreateAiProviderInput) => {
@@ -267,6 +318,8 @@ export const aiProvidersService = {
 	},
 
 	markUsed: async (input: { id: string; userId: string }) => {
+		if (input.id === ORGANIZATION_PROVIDER_ID) return;
+
 		await db
 			.update(schema.aiProvider)
 			.set({ lastUsedAt: new Date() })

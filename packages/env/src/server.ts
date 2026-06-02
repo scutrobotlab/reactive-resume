@@ -69,6 +69,14 @@ export const env = createEnv({
 		// AI Agent Workspace (optional until the agent feature is used)
 		REDIS_URL: z.url({ protocol: /redis(s)?/ }).optional(),
 		ENCRYPTION_SECRET: z.string().min(32, "ENCRYPTION_SECRET must be at least 32 characters").optional(),
+		AI_ORG_ENABLED: z.stringbool().default(false),
+		AI_ORG_LABEL: z.string().min(1).optional(),
+		AI_ORG_PROVIDER: z
+			.enum(["openai", "anthropic", "gemini", "vercel-ai-gateway", "openrouter", "ollama", "openai-compatible"])
+			.optional(),
+		AI_ORG_MODEL: z.string().min(1).optional(),
+		AI_ORG_BASE_URL: z.url({ protocol: /https?/ }).optional(),
+		AI_ORG_API_KEY: z.string().min(1).optional(),
 
 		// Feature Flags
 		FLAG_DISABLE_SIGNUPS: z.stringbool().default(false),

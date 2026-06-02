@@ -133,6 +133,11 @@ function ProviderRow({ provider }: ProviderRowProps) {
 							<Trans>Enabled</Trans>
 						</Badge>
 					) : null}
+					{provider.readOnly ? (
+						<Badge variant="secondary">
+							<Trans>Organization</Trans>
+						</Badge>
+					) : null}
 				</div>
 
 				<div className="grid gap-1 text-muted-foreground text-sm">
@@ -151,7 +156,7 @@ function ProviderRow({ provider }: ProviderRowProps) {
 				<div className="flex items-center gap-2 pe-2">
 					<Switch
 						checked={provider.enabled}
-						disabled={provider.testStatus !== "success" || isMutating}
+						disabled={provider.readOnly || provider.testStatus !== "success" || isMutating}
 						onCheckedChange={(enabled) =>
 							updateProvider(
 								{ id: provider.id, enabled },
@@ -170,7 +175,7 @@ function ProviderRow({ provider }: ProviderRowProps) {
 
 				<Button
 					variant="outline"
-					disabled={isMutating}
+					disabled={provider.readOnly || isMutating}
 					onClick={() =>
 						testProvider(
 							{ id: provider.id },
@@ -198,7 +203,7 @@ function ProviderRow({ provider }: ProviderRowProps) {
 				<Button
 					size="icon"
 					variant="ghost"
-					disabled={isMutating}
+					disabled={provider.readOnly || isMutating}
 					onClick={() =>
 						deleteProvider(
 							{ id: provider.id },
