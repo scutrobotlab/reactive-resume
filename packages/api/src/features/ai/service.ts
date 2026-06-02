@@ -2,6 +2,7 @@ import type { AIProvider } from "@reactive-resume/ai/types";
 import type { ResumeAnalysis } from "@reactive-resume/schema/resume/analysis";
 import type { ResumeData } from "@reactive-resume/schema/resume/data";
 import type { ModelMessage, UIMessage } from "ai";
+import { Buffer } from "node:buffer";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -72,6 +73,7 @@ type GetModelInput = {
 
 const MAX_AI_FILE_BYTES = 10 * 1024 * 1024; // 10MB
 const MAX_AI_FILE_BASE64_CHARS = Math.ceil((MAX_AI_FILE_BYTES * 4) / 3) + 4;
+const MAX_EXTRACTED_RESUME_TEXT_CHARS = 60_000;
 
 export function getModel(input: GetModelInput) {
 	const { provider, model, apiKey } = input;
@@ -162,17 +164,80 @@ function buildResumeParsingMessages({
 	];
 }
 
+function truncateExtractedText(text: string) {
+	return text.length <= MAX_EXTRACTED_RESUME_TEXT_CHARS ? text : text.slice(0, MAX_EXTRACTED_RESUME_TEXT_CHARS);
+}
+
+async function extractPdfText(file: z.infer<typeof fileInputSchema>) {
+	const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+	const data = Uint8Array.from(Buffer.from(file.data, "base64"));
+	const loadingTask = getDocument({ data });
+	const pdf = await loadingTask.promise;
+
+	const pages: string[] = [];
+
+	for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+		const page = await pdf.getPage(pageNumber);
+		const textContent = await page.getTextContent();
+		const pageText = textContent.items
+			.map((item) => ("str" in item && typeof item.str === "string" ? item.str : ""))
+			.filter(Boolean)
+			.join(" ")
+			.replace(/\s+/g, " ")
+			.trim();
+
+		if (pageText) pages.push(pageText);
+		page.cleanup();
+	}
+
+	return truncateExtractedText(pages.join("\n\n").trim());
+}
+
+function buildResumeParsingTextMessages({
+	systemPrompt,
+	userPrompt,
+	filename,
+	text,
+}: {
+	systemPrompt: string;
+	userPrompt: string;
+	filename: string;
+	text: string;
+}): ModelMessage[] {
+	return [
+		{
+			role: "system",
+			content: `${systemPrompt}\n\nIMPORTANT: You must return ONLY raw valid JSON. Do not return markdown, do not return explanations. Just the JSON object. Use the following JSON as a template and fill in the extracted values. For arrays, you MUST use the exact key names shown in the template (e.g. use 'description' instead of 'summary', 'website' instead of 'url'):\n\n${JSON.stringify(aiExtractionTemplate, null, 2)}`,
+		},
+		{
+			role: "user",
+			content: `${userPrompt}\n\nThe server has extracted readable text from ${filename}. Use only this extracted text as the source document:\n\n${text}`,
+		},
+	];
+}
+
 async function parsePdf(input: ParsePdfInput): Promise<ResumeData> {
 	const model = getModel(input);
+	const extractedText = await extractPdfText(input.file).catch((error: unknown) => {
+		console.warn("Failed to extract PDF text before AI parsing; falling back to file input.", error);
+		return "";
+	});
 
 	const result = await generateText({
 		model,
-		messages: buildResumeParsingMessages({
-			systemPrompt: pdfParserSystemPrompt,
-			userPrompt: pdfParserUserPrompt,
-			file: input.file,
-			mediaType: "application/pdf",
-		}),
+		messages: extractedText
+			? buildResumeParsingTextMessages({
+					systemPrompt: pdfParserSystemPrompt,
+					userPrompt: pdfParserUserPrompt,
+					filename: input.file.name,
+					text: extractedText,
+				})
+			: buildResumeParsingMessages({
+					systemPrompt: pdfParserSystemPrompt,
+					userPrompt: pdfParserUserPrompt,
+					file: input.file,
+					mediaType: "application/pdf",
+				}),
 	}).catch((error: unknown) => logAndRethrow("Failed to generate the text with the model", error));
 
 	return parseAndValidateResumeJson(result.text);

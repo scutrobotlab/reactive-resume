@@ -43,6 +43,7 @@
 		"es-toolkit": "^1.47.0",
 		"ioredis": "^5.11.0",
 		"ollama-ai-provider-v2": "^3.5.1",
+		"pdfjs-dist": "6.0.227",
 		"react": "^19.2.6",
 		"resumable-stream": "^2.2.12",
 		"sharp": "^0.34.5",
