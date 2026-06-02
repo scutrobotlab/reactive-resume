@@ -17,6 +17,10 @@ import { resolveAiBaseUrl } from "../ai/url-policy";
 type AiProviderRecord = typeof schema.aiProvider.$inferSelect;
 const ORGANIZATION_PROVIDER_ID = "organization-default";
 
+export function isOrganizationProviderId(id: string | null | undefined) {
+	return id === ORGANIZATION_PROVIDER_ID;
+}
+
 export type AiProviderResponse = {
 	id: string;
 	label: string;
